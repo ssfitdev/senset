@@ -2,6 +2,9 @@
   "name": "mcq-exam-system",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "jose": "4.15.9"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
