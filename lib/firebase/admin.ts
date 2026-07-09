@@ -18,7 +18,10 @@ function buildAdminApp(): App {
   let privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
 
   if (privateKey) {
-    if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+    if (
+      (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+      (privateKey.startsWith("'") && privateKey.endsWith("'"))
+    ) {
       privateKey = privateKey.slice(1, -1);
     }
     privateKey = privateKey.replace(/\\n/g, "\n");
@@ -26,7 +29,10 @@ function buildAdminApp(): App {
 
   if (!projectId || !clientEmail || !privateKey) {
     throw new Error(
-      "Missing Firebase Admin credentials. Set FIREBASE_ADMIN_CLIENT_EMAIL and FIREBASE_ADMIN_PRIVATE_KEY (or enable NEXT_PUBLIC_USE_FIREBASE_EMULATORS for local dev).",
+      `Missing Firebase Admin credentials. Environment status: ` +
+      `projectId=${projectId ? "set" : "missing"}, ` +
+      `clientEmail=${clientEmail ? "set" : "missing"}, ` +
+      `privateKey=${privateKey ? "set" : "missing"}.`
     );
   }
 
@@ -35,7 +41,39 @@ function buildAdminApp(): App {
   });
 }
 
-const adminApp = buildAdminApp();
+let cachedApp: App | null = null;
+let cachedAuth: Auth | null = null;
+let cachedDb: Firestore | null = null;
 
-export const adminAuth: Auth = getAuth(adminApp);
-export const adminDb: Firestore = getFirestore(adminApp);
+function getAdminApp(): App {
+  if (!cachedApp) {
+    cachedApp = buildAdminApp();
+  }
+  return cachedApp;
+}
+
+export const adminAuth: Auth = new Proxy({} as Auth, {
+  get(target, prop, receiver) {
+    if (!cachedAuth) {
+      cachedAuth = getAuth(getAdminApp());
+    }
+    const value = Reflect.get(cachedAuth, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(cachedAuth);
+    }
+    return value;
+  },
+});
+
+export const adminDb: Firestore = new Proxy({} as Firestore, {
+  get(target, prop, receiver) {
+    if (!cachedDb) {
+      cachedDb = getFirestore(getAdminApp());
+    }
+    const value = Reflect.get(cachedDb, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(cachedDb);
+    }
+    return value;
+  },
+});
