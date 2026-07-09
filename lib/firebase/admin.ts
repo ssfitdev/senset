@@ -15,7 +15,14 @@ function buildAdminApp(): App {
   }
 
   const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  let privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+
+  if (privateKey) {
+    if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+      privateKey = privateKey.slice(1, -1);
+    }
+    privateKey = privateKey.replace(/\\n/g, "\n");
+  }
 
   if (!projectId || !clientEmail || !privateKey) {
     throw new Error(
