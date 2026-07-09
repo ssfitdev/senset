@@ -23,6 +23,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
+import { db } from "@/lib/firebase/client";
+import { doc, onSnapshot } from "firebase/firestore";
+import { COLLECTIONS, EXAM_CONFIG_DOC_ID, type ExamSessionDoc, type ExamConfigDoc } from "@/lib/firestore/schema";
+import { computeClientWindowState } from "@/lib/exam/clientConfig";
+
 const container: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
@@ -66,6 +71,10 @@ export function InstructionsView() {
     }
 
     let cancelled = false;
+    let unsubscribeSession: (() => void) | null = null;
+    let unsubscribeConfig: (() => void) | null = null;
+
+    // 1. Fetch initial static data (like student info) and baseline states
     authFetch("/api/exam/status")
       .then(async (res) => {
         const data = await res.json();
@@ -74,17 +83,86 @@ export function InstructionsView() {
           setError(data.error ?? "Something went wrong.");
           return;
         }
+
         setStatus(data);
+
+        // Immediate redirect check
         if (data.session?.status === "submitted") {
           router.replace(`/exam/${data.student.studentId}/result`);
+          return;
         } else if (data.session?.status === "in_progress") {
           router.replace(`/exam/${data.student.studentId}`);
+          return;
         }
+
+        const studentId = data.student.studentId;
+
+        // 2. Stream student's exam session document in real-time
+        unsubscribeSession = onSnapshot(
+          doc(db, COLLECTIONS.examSessions, studentId),
+          (snap) => {
+            if (cancelled) return;
+            if (!snap.exists()) return;
+            const sessionData = snap.data() as ExamSessionDoc;
+
+            setStatus((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                session: {
+                  status: sessionData.status,
+                  startedAt: sessionData.startedAt.toMillis(),
+                  expiresAt: sessionData.expiresAt.toMillis(),
+                  totalQuestions: sessionData.totalQuestions,
+                  score: sessionData.score ?? null,
+                  totalCorrect: sessionData.totalCorrect ?? null,
+                  totalWrong: sessionData.totalWrong ?? null,
+                  totalAttempted: sessionData.totalAttempted ?? null,
+                },
+              };
+            });
+
+            if (sessionData.status === "submitted") {
+              router.replace(`/exam/${studentId}/result`);
+            } else if (sessionData.status === "in_progress") {
+              router.replace(`/exam/${studentId}`);
+            }
+          },
+          (err) => console.error("Real-time session stream failed:", err)
+        );
+
+        // 3. Stream the exam configuration document in real-time
+        unsubscribeConfig = onSnapshot(
+          doc(db, COLLECTIONS.examConfig, EXAM_CONFIG_DOC_ID),
+          (snap) => {
+            if (cancelled) return;
+            if (!snap.exists()) return;
+            const configData = snap.data() as ExamConfigDoc;
+            const windowState = computeClientWindowState(configData);
+
+            setStatus((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                window: windowState,
+                resultsVisibleToStudents: configData.resultsVisibleToStudents,
+              };
+            });
+          },
+          (err) => console.error("Real-time config stream failed:", err)
+        );
       })
-      .catch(() => !cancelled && setError("Couldn't reach the server."));
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("Failed to fetch initial exam status:", err);
+          setError("Couldn't reach the server.");
+        }
+      });
 
     return () => {
       cancelled = true;
+      if (unsubscribeSession) unsubscribeSession();
+      if (unsubscribeConfig) unsubscribeConfig();
     };
   }, [user, router]);
 

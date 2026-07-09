@@ -1,54 +1,81 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase/client";
+import { COLLECTIONS, EXAM_CONFIG_DOC_ID, type ExamConfigDoc } from "@/lib/firestore/schema";
+import { computeClientWindowState } from "@/lib/exam/clientConfig";
 
-export type WindowStatus = "unconfigured" | "not-open" | "open" | "closed";
-
-interface WindowStatusResponse {
-  status: WindowStatus;
-  startAt: number | null;
-  endAt: number | null;
-  durationMinutes: number | null;
-  serverNow: number;
-}
+export type { WindowStatus, WindowState } from "@/lib/exam/clientConfig";
 
 /**
- * Polls the server for the exam window state and ticks a locally-corrected
- * "server now" every second in between polls, so the countdown stays smooth
- * without trusting the client's own clock.
+ * Subscribes to the Firestore database for the exam window configuration in real-time
+ * and ticks a locally-corrected "server now" every second using the offset from
+ * the server's time, so countdowns stay synchronized.
  */
-export function useExamWindow(pollMs = 60_000) {
-  const [data, setData] = useState<WindowStatusResponse | null>(null);
+export function useExamWindow() {
+  const [config, setConfig] = useState<ExamConfigDoc | null>(null);
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [tick, setTick] = useState(() => Date.now());
+  const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
-    const res = await fetch("/api/exam/window-status", { cache: "no-store" });
-    const json: WindowStatusResponse = await res.json();
-    setData(json);
-    setClockOffsetMs(json.serverNow - Date.now());
+  // 1. Fetch server time once to establish a baseline client-server offset
+  useEffect(() => {
+    let active = true;
+    fetch("/api/exam/server-time", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((json) => {
+        if (active && typeof json.serverNow === "number") {
+          setClockOffsetMs(json.serverNow - Date.now());
+        }
+      })
+      .catch((err) => console.error("Failed to fetch server time baseline:", err));
+
+    return () => {
+      active = false;
+    };
   }, []);
 
+  // 2. Subscribe to the exam settings document in real-time
   useEffect(() => {
-    refresh();
-    const poll = setInterval(refresh, pollMs);
-    return () => clearInterval(poll);
-  }, [refresh, pollMs]);
+    const docRef = doc(db, COLLECTIONS.examConfig, EXAM_CONFIG_DOC_ID);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setConfig(snapshot.data() as ExamConfigDoc);
+        } else {
+          setConfig(null);
+        }
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Firestore onSnapshot subscription failed:", error);
+        setLoading(false);
+      }
+    );
 
+    return () => unsubscribe();
+  }, []);
+
+  // 3. Tick local timer every second to keep the countdown updated
   useEffect(() => {
-    const timer = setInterval(() => setTick(Date.now()), 1000);
+    const timer = setInterval(() => {
+      setTick(Date.now());
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
   const serverNow = tick + clockOffsetMs;
+  const state = computeClientWindowState(config, serverNow);
 
   return {
-    status: data?.status ?? null,
-    startAt: data?.startAt ?? null,
-    endAt: data?.endAt ?? null,
-    durationMinutes: data?.durationMinutes ?? null,
+    status: state.status,
+    startAt: state.startAt,
+    endAt: state.endAt,
+    durationMinutes: state.durationMinutes,
     serverNow,
-    loading: data === null,
-    refresh,
+    loading,
+    refresh: async () => {}, // No-op since it is real-time
   };
 }

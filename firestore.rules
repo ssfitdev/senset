@@ -33,7 +33,7 @@ service cloud.firestore {
     // Exam window/duration/toggles. Students need to read this directly to
     // render live countdown/window state; only admins can change it.
     match /examConfig/{docId} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if isAdmin();
     }
 
