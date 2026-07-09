@@ -52,8 +52,20 @@ function getAdminApp(): App {
   return cachedApp;
 }
 
+const EXCLUDE_PROPS = new Set([
+  "then",
+  "toJSON",
+  "inspect",
+  "constructor",
+  "$$typeof",
+  "prototype",
+]);
+
 export const adminAuth: Auth = new Proxy({} as Auth, {
   get(target, prop, receiver) {
+    if (typeof prop === "symbol" || EXCLUDE_PROPS.has(prop as string)) {
+      return Reflect.get(target, prop, receiver);
+    }
     if (!cachedAuth) {
       cachedAuth = getAuth(getAdminApp());
     }
@@ -67,6 +79,9 @@ export const adminAuth: Auth = new Proxy({} as Auth, {
 
 export const adminDb: Firestore = new Proxy({} as Firestore, {
   get(target, prop, receiver) {
+    if (typeof prop === "symbol" || EXCLUDE_PROPS.has(prop as string)) {
+      return Reflect.get(target, prop, receiver);
+    }
     if (!cachedDb) {
       cachedDb = getFirestore(getAdminApp());
     }
