@@ -1,5 +1,6 @@
 # SensET Exam System - Easy User Guide
 
+
 This guide is written for non-technical coordinators and exam invigilators to help you manage the SensET examination system.
 
 ---
