@@ -102,7 +102,9 @@ export function AnalyticsView() {
     const sortedScorers = [...sessions]
       .filter((s) => s.status === "submitted" && s.score !== null && s.submittedAt && s.startedAt)
       .map((s) => {
-        const timeTakenMs = s.submittedAt! - s.startedAt;
+        const actualTimeMs = s.submittedAt! - s.startedAt;
+        const maxTimeMs = 40 * 60 * 1000; // 40 minutes in ms
+        const timeTakenMs = Math.min(actualTimeMs, maxTimeMs);
         return {
           ...s,
           timeTakenMs,

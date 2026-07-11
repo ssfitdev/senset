@@ -67,7 +67,9 @@ export function SessionAnalyticsView() {
     return sessions
       .filter((s) => s.status === "submitted" && s.submittedAt && s.startedAt)
       .map((s) => {
-        const timeTakenMs = s.submittedAt! - s.startedAt;
+        const actualTimeMs = s.submittedAt! - s.startedAt;
+        const maxTimeMs = 40 * 60 * 1000; // 40 minutes in ms
+        const timeTakenMs = Math.min(actualTimeMs, maxTimeMs);
         const totalAttempted = s.totalAttempted ?? 0;
         const totalQ = s.totalQuestions || 50;
         const timePerQSec = totalAttempted > 0 ? (timeTakenMs / 1000) / totalAttempted : 0;
