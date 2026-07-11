@@ -11,11 +11,12 @@ import {
   TrendingUp, 
   Users,
   Activity,
-  AlertTriangle
+  AlertTriangle,
+  MessageSquare
 } from "lucide-react";
 import { useExamSessions } from "@/hooks/useExamSessions";
 import { useFirestoreCollection } from "@/hooks/useFirestoreCollection";
-import type { StudentDoc } from "@/lib/firestore/schema";
+import type { StudentDoc, FeedbackDoc } from "@/lib/firestore/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,6 +55,7 @@ function formatDuration(ms: number): string {
 export function SessionAnalyticsView() {
   const sessions = useExamSessions();
   const students = useFirestoreCollection<StudentDoc>("students");
+  const feedback = useFirestoreCollection<FeedbackDoc>("feedback");
 
   // Search, filter, and sorting states
   const [searchTerm, setSearchTerm] = useState("");
@@ -61,6 +63,7 @@ export function SessionAnalyticsView() {
   const [sortBy, setSortBy] = useState<"time" | "score" | "timePerQ">("time");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [showAllAffected, setShowAllAffected] = useState(false);
+  const [showAllReports, setShowAllReports] = useState(false);
 
   // Filter and process completed sessions
   const submittedSessions = useMemo(() => {
@@ -126,6 +129,33 @@ export function SessionAnalyticsView() {
       })
       .sort((a, b) => b.severity - a.severity);
   }, [sessions]);
+
+  // Filter feedback logs to extract student-reported support tickets
+  const studentReports = useMemo(() => {
+    if (!feedback) return [];
+    return feedback
+      .filter((f) => f.isIssueReport === true || f.message.startsWith("[ISSUE REPORT:"))
+      .map((f) => {
+        const isReportFormat = f.message.startsWith("[ISSUE REPORT:");
+        let issueTypeLabel = "Other Technical Issue";
+        let cleanMessage = f.message;
+        
+        if (isReportFormat) {
+          const closeBracketIdx = f.message.indexOf("]");
+          if (closeBracketIdx !== -1) {
+            issueTypeLabel = f.message.slice(15, closeBracketIdx);
+            cleanMessage = f.message.slice(closeBracketIdx + 1).trim();
+          }
+        }
+        
+        return {
+          ...f,
+          issueTypeLabel,
+          cleanMessage,
+        };
+      })
+      .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0));
+  }, [feedback]);
 
   // Overall session metrics
   const metrics = useMemo(() => {
@@ -615,6 +645,80 @@ export function SessionAnalyticsView() {
                 onClick={() => setShowAllAffected(!showAllAffected)}
               >
                 {showAllAffected ? "Collapse List" : `Show All ${affectedStudents.length} Affected`}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Student-Reported Outage & Technical Issues */}
+      {studentReports.length > 0 && (
+        <div className="rounded-2xl border bg-card p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="size-5 text-indigo-500" />
+            <h2 className="text-base font-bold text-foreground">Student-Reported Support Tickets & Outage Logs</h2>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            The following issues were submitted directly by students using the support form, detailing their client-side glitches during the server bottleneck:
+          </p>
+
+          <div className="rounded-xl border bg-card overflow-hidden">
+            <Table>
+              <TableHeader className="bg-muted/40">
+                <TableRow>
+                  <TableHead className="w-16 text-center text-xs">No.</TableHead>
+                  <TableHead className="text-xs">Student</TableHead>
+                  <TableHead className="text-xs">Problem Category</TableHead>
+                  <TableHead className="text-xs">Reported Time</TableHead>
+                  <TableHead className="text-xs">Description Details</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(showAllReports ? studentReports : studentReports.slice(0, 5)).map((f, idx) => {
+                  const dateStr = f.createdAt && typeof f.createdAt.toDate === "function"
+                    ? f.createdAt.toDate().toLocaleString()
+                    : "";
+                  return (
+                    <TableRow key={f.id}>
+                      <TableCell className="text-center font-bold text-xs text-muted-foreground">
+                        {idx + 1}
+                      </TableCell>
+                      <TableCell className="max-w-[150px]">
+                        <p className="font-semibold text-xs text-foreground truncate" title={f.studentName}>{f.studentName}</p>
+                        <p className="text-[9px] text-muted-foreground">{f.studentId}</p>
+                      </TableCell>
+                      <TableCell className="max-w-[150px]">
+                        <span className="inline-flex items-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-[9.5px] font-bold text-indigo-600 truncate" title={f.issueTypeLabel}>
+                          {f.issueTypeLabel}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap text-xs">
+                        {dateStr}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground max-w-[280px]">
+                        <p className="line-clamp-2 hover:line-clamp-none text-xs transition-all leading-normal whitespace-pre-wrap cursor-pointer" title="Full description">
+                          {f.cleanMessage}
+                        </p>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-t border-muted/15 pt-3">
+            <span className="text-[11px] text-muted-foreground">
+              Total Support Reports Filed: <strong>{studentReports.length} student reports</strong>
+            </span>
+            {studentReports.length > 5 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs border-muted-foreground/20 text-muted-foreground hover:bg-muted/10 hover:text-foreground"
+                onClick={() => setShowAllReports(!showAllReports)}
+              >
+                {showAllReports ? "Collapse List" : `Show All ${studentReports.length} Reports`}
               </Button>
             )}
           </div>

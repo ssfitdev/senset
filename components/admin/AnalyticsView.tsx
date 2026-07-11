@@ -10,8 +10,10 @@ import {
   BookOpen, 
   Calendar,
   Percent,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Search
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useExamSessions } from "@/hooks/useExamSessions";
 import { useFirestoreCollection } from "@/hooks/useFirestoreCollection";
 import type { StudentDoc } from "@/lib/firestore/schema";
@@ -32,6 +34,7 @@ export function AnalyticsView() {
 
   // Toggle state to view stats by either Registered Students or Exam Participants (Submitted)
   const [breakdownMode, setBreakdownMode] = useState<"registered" | "submitted">("registered");
+  const [leaderboardSearch, setLeaderboardSearch] = useState("");
 
   // Process data for charts and statistics
   const processedData = useMemo(() => {
@@ -97,9 +100,14 @@ export function AnalyticsView() {
       submitted: data.submitted,
     })).sort((a, b) => b.registered - a.registered);
 
-    // 3. Top 20 Top Scorer Students
+    // 3. Leaderboard of all Scorer Students
     // Tie-breaker: sort by score desc, then by time taken asc
-    const sortedScorers = [...sessions]
+    const studentPhoneMap = new Map<string, string>();
+    students.forEach((s) => {
+      studentPhoneMap.set(s.id, s.phone);
+    });
+
+    const allScorers = [...sessions]
       .filter((s) => s.status === "submitted" && s.score !== null && s.submittedAt && s.startedAt)
       .map((s) => {
         const actualTimeMs = s.submittedAt! - s.startedAt;
@@ -109,6 +117,7 @@ export function AnalyticsView() {
           ...s,
           timeTakenMs,
           score: s.score ?? 0,
+          phone: studentPhoneMap.get(s.studentId) || "",
         };
       })
       .sort((a, b) => {
@@ -117,8 +126,6 @@ export function AnalyticsView() {
         }
         return a.timeTakenMs - b.timeTakenMs; // lower time wins tie-break
       });
-
-    const top20Scorers = sortedScorers.slice(0, 20);
 
     // 4. Score Distribution (Histogram)
     const scoreBuckets = [
@@ -155,7 +162,7 @@ export function AnalyticsView() {
     return {
       divisionStats,
       districtStats,
-      top20Scorers,
+      allScorers,
       scoreBuckets,
       summary: {
         totalRegistered: students.length,
@@ -168,6 +175,21 @@ export function AnalyticsView() {
   }, [students, sessions]);
 
   const loading = !students || !sessions || !processedData;
+
+  const filteredScorers = useMemo(() => {
+    if (!processedData) return [];
+    let list = processedData.allScorers;
+    if (leaderboardSearch.trim() !== "") {
+      const term = leaderboardSearch.toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.studentName.toLowerCase().includes(term) ||
+          s.studentId.toLowerCase().includes(term) ||
+          s.phone.toLowerCase().includes(term)
+      );
+    }
+    return list;
+  }, [processedData, leaderboardSearch]);
 
   if (loading) {
     return (
@@ -187,14 +209,13 @@ export function AnalyticsView() {
     );
   }
 
-  const { divisionStats, districtStats, top20Scorers, scoreBuckets, summary } = processedData;
+  const { divisionStats, districtStats, allScorers, scoreBuckets, summary } = processedData;
 
   // Chart max counts for SVG scaling
   const activeKey = breakdownMode; // 'registered' | 'submitted'
   const maxDistrictCount = Math.max(...districtStats.map(d => d[activeKey]), 1);
   const maxDivisionCount = Math.max(...divisionStats.map(d => d[activeKey]), 1);
   const maxScoreCount = Math.max(...scoreBuckets.map(b => b.count), 1);
-  const maxTopScorerVal = Math.max(...top20Scorers.map(s => s.score), 1);
 
   return (
     <div className="flex flex-col gap-6">
@@ -558,121 +579,85 @@ export function AnalyticsView() {
         </div>
       </div>
 
-      {/* Top 20 Top Scorer Students */}
+      {/* Exam Scorer Leaderboard */}
       <div className="rounded-2xl border bg-card p-5">
-        <div className="flex items-center gap-2 mb-5">
-          <Trophy className="size-5 text-amber-500" />
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Top 20 Scorer Leaderboard</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Ranked by highest score, with faster submission times used as a tie-breaker.
-            </p>
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
+          <div className="flex items-center gap-2">
+            <Trophy className="size-5 text-amber-500" />
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Exam Scorer Leaderboard</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                All submitted sessions ranked by highest score. Ties are broken by fastest completion time.
+              </p>
+            </div>
+          </div>
+          
+          <div className="relative w-[260px]">
+            <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by ID, name, or phone..."
+              className="pl-8 h-9"
+              value={leaderboardSearch}
+              onChange={(e) => setLeaderboardSearch(e.target.value)}
+            />
           </div>
         </div>
 
-        {/* Top 20 ranking graph and table side-by-side on desktop */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Top 20 visual ranking bar chart */}
-          <div className="lg:col-span-4 border rounded-xl p-4 flex flex-col justify-between bg-muted/20 min-h-[300px]">
-            <h3 className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Top Scorers Chart</h3>
-            {top20Scorers.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
-                No scores to rank.
-              </div>
-            ) : (
-              <div className="flex-1 flex items-end justify-between px-2 pt-4 h-56">
-                {top20Scorers.slice(0, 10).map((s, i) => {
-                  const percent = maxTopScorerVal > 0 ? (s.score / maxTopScorerVal) * 100 : 0;
-                  const mins = Math.floor(s.timeTakenMs / 60000);
-                  const secs = Math.floor((s.timeTakenMs % 60000) / 1000);
-                  const timeStr = `${mins}m ${secs}s`;
-                  return (
-                    <div key={s.studentId} className="flex flex-col items-center gap-1.5 group w-full max-w-[32px] sm:max-w-[40px]">
-                      <div className="text-[8px] font-bold text-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-200 tabular-nums flex flex-col items-center leading-none text-center h-5 justify-end">
-                        <span>{s.score} pt</span>
-                        <span className="text-[6.5px] text-muted-foreground font-normal mt-0.5">{timeStr}</span>
-                      </div>
-                      <div 
-                        className="w-3 sm:w-4 bg-amber-500 rounded-t-sm group-hover:bg-amber-400 transition-all duration-300 relative" 
-                        style={{ height: `${percent * 1.3}px` }}
-                        title={`${s.studentName}\nRank: #${i + 1}\nScore: ${s.score} marks\nTime Taken: ${timeStr}`}
-                      >
-                        {/* Label rank in bar */}
-                        <span className="absolute bottom-1 inset-x-0 text-center text-[7px] text-white font-bold leading-none">
-                          {i + 1}
-                        </span>
-                      </div>
-                      <span className="text-[8px] font-medium text-muted-foreground truncate w-full text-center" title={s.studentName}>
-                        {s.studentName.split(" ")[0]}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <p className="text-[9px] text-muted-foreground italic text-center mt-3 border-t pt-2">
-              Top 10 scorers comparison (Bar is score. Hover for score + time taken details)
-            </p>
-          </div>
+        <div className="overflow-x-auto rounded-xl border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12 text-center">Rank</TableHead>
+                <TableHead>Student</TableHead>
+                <TableHead>District / Division</TableHead>
+                <TableHead className="text-right">Time taken</TableHead>
+                <TableHead className="text-right">Score</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredScorers.map((s, idx) => {
+                const mins = Math.floor(s.timeTakenMs / 60000);
+                const secs = Math.floor((s.timeTakenMs % 60000) / 1000);
+                const timeFormatted = `${mins}m ${secs}s`;
 
-          {/* Top 20 details table */}
-          <div className="lg:col-span-8 overflow-x-auto rounded-xl border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12 text-center">Rank</TableHead>
-                  <TableHead>Student</TableHead>
-                  <TableHead>District / Division</TableHead>
-                  <TableHead className="text-right">Time taken</TableHead>
-                  <TableHead className="text-right">Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {top20Scorers.map((s, idx) => {
-                  // Format time taken
-                  const mins = Math.floor(s.timeTakenMs / 60000);
-                  const secs = Math.floor((s.timeTakenMs % 60000) / 1000);
-                  const timeFormatted = `${mins}m ${secs}s`;
-
-                  return (
-                    <TableRow key={s.studentId} className={idx < 3 ? "bg-amber-500/5 hover:bg-amber-500/10" : ""}>
-                      <TableCell className="text-center font-bold text-muted-foreground">
-                        {idx + 1 === 1 ? (
-                          <span className="text-amber-500">🏆 1</span>
-                        ) : idx + 1 === 2 ? (
-                          <span className="text-slate-400">🥈 2</span>
-                        ) : idx + 1 === 3 ? (
-                          <span className="text-amber-700">🥉 3</span>
-                        ) : (
-                          idx + 1
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <p className="font-semibold text-foreground text-sm">{s.studentName}</p>
-                        <p className="text-[10px] text-muted-foreground">{s.studentId}</p>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {s.district}, {s.division}
-                      </TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
-                        {timeFormatted}
-                      </TableCell>
-                      <TableCell className="text-right font-bold text-foreground tabular-nums">
-                        {s.score}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {top20Scorers.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                      No submissions found yet.
+                return (
+                  <TableRow key={s.studentId} className={idx < 3 ? "bg-amber-500/5 hover:bg-amber-500/10" : ""}>
+                    <TableCell className="text-center font-bold text-muted-foreground">
+                      {idx + 1 === 1 ? (
+                        <span className="text-amber-500">🏆 1</span>
+                      ) : idx + 1 === 2 ? (
+                        <span className="text-slate-400">🥈 2</span>
+                      ) : idx + 1 === 3 ? (
+                        <span className="text-amber-700">🥉 3</span>
+                      ) : (
+                        idx + 1
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <p className="font-semibold text-foreground text-sm">{s.studentName}</p>
+                      <p className="text-[10px] text-muted-foreground">{s.studentId} {s.phone ? `· ${s.phone}` : ""}</p>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {s.district}, {s.division}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground tabular-nums font-medium">
+                      {timeFormatted}
+                    </TableCell>
+                    <TableCell className="text-right font-bold text-foreground tabular-nums">
+                      {s.score}
                     </TableCell>
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                );
+              })}
+              {filteredScorers.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                    No matching student scores found.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
       </div>
     </div>

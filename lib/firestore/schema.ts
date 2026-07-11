@@ -93,6 +93,8 @@ export interface FeedbackDoc {
   studentName: string;
   message: string;
   createdAt: TimestampLike;
+  isIssueReport?: boolean;
+  issueType?: string;
 }
 
 export type SessionEventType =
