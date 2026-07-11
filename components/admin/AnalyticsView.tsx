@@ -583,15 +583,19 @@ export function AnalyticsView() {
               <div className="flex-1 flex items-end justify-between px-2 pt-4 h-56">
                 {top20Scorers.slice(0, 10).map((s, i) => {
                   const percent = maxTopScorerVal > 0 ? (s.score / maxTopScorerVal) * 100 : 0;
+                  const mins = Math.floor(s.timeTakenMs / 60000);
+                  const secs = Math.floor((s.timeTakenMs % 60000) / 1000);
+                  const timeStr = `${mins}m ${secs}s`;
                   return (
-                    <div key={s.studentId} className="flex flex-col items-center gap-1.5 group w-full max-w-[20px]">
-                      <span className="text-[8px] font-bold text-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-200 tabular-nums">
-                        {s.score}
-                      </span>
+                    <div key={s.studentId} className="flex flex-col items-center gap-1.5 group w-full max-w-[32px] sm:max-w-[40px]">
+                      <div className="text-[8px] font-bold text-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-200 tabular-nums flex flex-col items-center leading-none text-center h-5 justify-end">
+                        <span>{s.score} pt</span>
+                        <span className="text-[6.5px] text-muted-foreground font-normal mt-0.5">{timeStr}</span>
+                      </div>
                       <div 
                         className="w-3 sm:w-4 bg-amber-500 rounded-t-sm group-hover:bg-amber-400 transition-all duration-300 relative" 
-                        style={{ height: `${percent * 1.5}px` }}
-                        title={`${s.studentName}: ${s.score} marks`}
+                        style={{ height: `${percent * 1.3}px` }}
+                        title={`${s.studentName}\nRank: #${i + 1}\nScore: ${s.score} marks\nTime Taken: ${timeStr}`}
                       >
                         {/* Label rank in bar */}
                         <span className="absolute bottom-1 inset-x-0 text-center text-[7px] text-white font-bold leading-none">
@@ -607,7 +611,7 @@ export function AnalyticsView() {
               </div>
             )}
             <p className="text-[9px] text-muted-foreground italic text-center mt-3 border-t pt-2">
-              Showing top 10 scorer scores comparison
+              Top 10 scorers comparison (Bar is score. Hover for score + time taken details)
             </p>
           </div>
 

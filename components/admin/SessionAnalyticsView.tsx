@@ -60,6 +60,7 @@ export function SessionAnalyticsView() {
   const [minAttemptedPercent, setMinAttemptedPercent] = useState("all");
   const [sortBy, setSortBy] = useState<"time" | "score" | "timePerQ">("time");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [showAllAffected, setShowAllAffected] = useState(false);
 
   // Filter and process completed sessions
   const submittedSessions = useMemo(() => {
@@ -82,6 +83,48 @@ export function SessionAnalyticsView() {
           attemptedPercent,
         };
       });
+  }, [sessions]);
+
+  // Outage diagnostic data: identify students whose answers were lost (0 attempts)
+  // or whose auto-submissions hung and completed significantly after expiration (> 60s)
+  const affectedStudents = useMemo(() => {
+    if (!sessions) return [];
+    return sessions
+      .filter((s) => {
+        if (s.status !== "submitted") return false;
+        const delayMs = s.submittedAt && s.expiresAt ? s.submittedAt - s.expiresAt : 0;
+        const isZeroAttempt = s.totalAttempted === 0 || s.totalAttempted === null;
+        return delayMs > 60000 || isZeroAttempt;
+      })
+      .map((s) => {
+        const delayMs = s.submittedAt && s.expiresAt ? s.submittedAt - s.expiresAt : 0;
+        const isZeroAttempt = s.totalAttempted === 0 || s.totalAttempted === null;
+        
+        let issue = "";
+        let details = "";
+        let severity = 0;
+        
+        if (isZeroAttempt) {
+          issue = "Saved Progress Lost (0 Attempts)";
+          details = "Student submitted the exam but has 0 questions attempted. Indicates database save failures or sudden connection loss during the outage.";
+          severity = 1000000; // Priority rank 1
+        } else {
+          const delaySecs = Math.round(delayMs / 1000);
+          issue = "Overtime Auto-Submission";
+          details = `Submitted ${delaySecs}s (${Math.round(delaySecs / 60)}m) after the exam expired. The student's screen timer finished, but the server failed to process the auto-submit request on time due to timeout locks.`;
+          severity = delayMs; // Rank by length of submission delay
+        }
+        
+        return {
+          ...s,
+          issue,
+          details,
+          severity,
+          delayMs,
+          isZeroAttempt,
+        };
+      })
+      .sort((a, b) => b.severity - a.severity);
   }, [sessions]);
 
   // Overall session metrics
@@ -494,6 +537,89 @@ export function SessionAnalyticsView() {
           )}
         </div>
       </div>
+
+      {/* Server Outage & Disruption Report */}
+      {affectedStudents.length > 0 && (
+        <div className="rounded-2xl border border-destructive/25 bg-destructive/5 dark:bg-destructive/10 p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-5 text-destructive animate-pulse" />
+            <h2 className="text-base font-bold text-destructive">Server Outage & Disruption Diagnostic Report</h2>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              During the exam session, database timeouts and server write locks occurred. This resulted in two failure modes:
+            </p>
+            <ul className="list-disc pl-4 text-xs text-muted-foreground mt-1.5 space-y-1">
+              <li><strong>Critical Progress Loss</strong>: The database failed to save any questions for the student, resulting in a 0/50 submitted exam score.</li>
+              <li><strong>Delayed Auto-Submission</strong>: When the student's timer expired, the auto-submit hung on the server. The exam was only successfully closed when the backend recovered or force-submitted the session later, showing extreme delayed submission times.</li>
+            </ul>
+          </div>
+          
+          <div className="rounded-xl border bg-card overflow-hidden">
+            <Table>
+              <TableHeader className="bg-muted/40">
+                <TableRow>
+                  <TableHead className="w-16 text-center text-xs">Rank</TableHead>
+                  <TableHead className="text-xs">Student</TableHead>
+                  <TableHead className="text-xs">Location</TableHead>
+                  <TableHead className="text-xs">Impact Type</TableHead>
+                  <TableHead className="text-right text-xs">Delay / Disruption Details</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(showAllAffected ? affectedStudents : affectedStudents.slice(0, 5)).map((s, idx) => (
+                  <TableRow key={s.studentId}>
+                    <TableCell className="text-center font-bold text-xs text-muted-foreground">
+                      {idx + 1}
+                    </TableCell>
+                    <TableCell>
+                      <p className="font-semibold text-xs text-foreground">{s.studentName}</p>
+                      <p className="text-[9px] text-muted-foreground">{s.studentId}</p>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {s.district}, {s.division}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {s.isZeroAttempt ? (
+                        <span className="inline-flex items-center rounded-md bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-600">
+                          Critical Progress Loss
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-md bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-600">
+                          Overtime Auto-Submit
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right text-xs font-semibold tabular-nums text-foreground">
+                      {s.isZeroAttempt ? (
+                        <span className="text-red-600 font-bold">0/50 Answers Saved</span>
+                      ) : (
+                        <span>+{Math.round(s.delayMs / 1000)}s (~{Math.round(s.delayMs / 60000)}m late)</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-t border-destructive/15 pt-3">
+            <span className="text-[11px] text-muted-foreground">
+              Total impacted: <strong>{affectedStudents.length} students</strong> ({affectedStudents.filter(x => x.isZeroAttempt).length} Critical, {affectedStudents.filter(x => !x.isZeroAttempt).length} Delayed)
+            </span>
+            {affectedStudents.length > 5 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs border-destructive/20 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setShowAllAffected(!showAllAffected)}
+              >
+                {showAllAffected ? "Collapse List" : `Show All ${affectedStudents.length} Affected`}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Leaderboard/Analysis Grid */}
       <div className="rounded-2xl border bg-card p-5">
