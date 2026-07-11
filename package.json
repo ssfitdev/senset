@@ -13,7 +13,8 @@
     "emulators": "firebase emulators:start",
     "seed:emulator": "tsx scripts/seed-emulator.ts",
     "seed:real": "tsx scripts/seed-real.ts",
-    "db:clear": "tsx scripts/clear-collections.ts"
+    "db:clear": "tsx scripts/clear-collections.ts",
+    "db:submit-sessions": "tsx scripts/submit-sessions.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

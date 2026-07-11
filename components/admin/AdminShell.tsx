@@ -5,12 +5,14 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
+  BarChart3,
   LayoutDashboard,
   ListChecks,
   LogOut,
   MessageSquare,
   Radio,
   Settings,
+  Timer,
   Trophy,
   Users,
 } from "lucide-react";
@@ -28,6 +30,8 @@ const NAV_ITEMS = [
   { href: "/admin/questions", label: "Questions", icon: ListChecks },
   { href: "/admin/live", label: "Live", icon: Radio },
   { href: "/admin/results", label: "Results", icon: Trophy },
+  { href: "/admin/session-analytics", label: "Session Stats", icon: Timer },
+  { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
 ];
 
